@@ -5,10 +5,10 @@ use rmcp::handler::server::router::prompt::PromptRouter;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    Annotated, ErrorData, GetPromptRequestParams, GetPromptResult, Implementation,
-    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    PromptMessage, PromptMessageRole, RawResource, RawResourceTemplate, ReadResourceRequestParams,
-    ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+    ErrorData, Implementation, ListResourceTemplatesResult, ListResourcesResult,
+    PaginatedRequestParams, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ResourceTemplate, Role,
+    ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{prompt, prompt_handler, prompt_router, tool, tool_handler, tool_router, ServerHandler};
@@ -28,20 +28,10 @@ pub struct SharedState {
     pub trust: TrustEngine,
 }
 
-fn make_resource(uri: &str, name: &str, description: &str) -> Annotated<RawResource> {
-    Annotated {
-        raw: RawResource {
-            uri: uri.to_string(),
-            name: name.to_string(),
-            title: None,
-            description: Some(description.to_string()),
-            mime_type: Some("application/json".to_string()),
-            size: None,
-            icons: None,
-            meta: None,
-        },
-        annotations: None,
-    }
+fn make_resource(uri: &str, name: &str, description: &str) -> Resource {
+    Resource::new(uri, name)
+        .with_description(description)
+        .with_mime_type("application/json")
 }
 
 // ---- Parameter structs ----
@@ -1825,7 +1815,7 @@ impl QuickDeskMcpServer {
     #[prompt(name = "operate_remote_desktop")]
     async fn operate_remote_desktop(&self) -> Result<Vec<PromptMessage>, ErrorData> {
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             "You are controlling a remote desktop through QuickDesk MCP tools. Follow this workflow:\n\
             \n\
             ## Core Loop: Screenshot → Analyze → Act → Verify\n\
@@ -1872,7 +1862,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let args = params.0;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Find and click the following element on the remote desktop: \"{}\"\n\
                 Device / session id: {}\n\
@@ -1909,7 +1899,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let args = params.0;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Run the following command on the remote desktop: `{}`\n\
                 Device / session id: {}\n\
@@ -1946,7 +1936,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let conn = params.0.device_id;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Perform a comprehensive health check on the remote server.\n\
                 Device / session id: {conn}\n\
@@ -2007,7 +1997,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let task = params.0.task_description;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Perform the following batch operation across multiple remote devices: \"{task}\"\n\
                 \n\
@@ -2050,7 +2040,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let args = params.0;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Diagnose the following issue on the remote desktop: \"{}\"\n\
                 Device / session id: {}\n\
@@ -2114,7 +2104,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let conn = params.0.device_id;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Analyze and describe the current screen content of the remote desktop in detail.\n\
                 Device / session id: {conn}\n\
@@ -2172,7 +2162,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let task = params.0.task_description;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Orchestrate the following workflow across multiple remote devices: \"{task}\"\n\
                 \n\
@@ -2234,7 +2224,7 @@ impl QuickDeskMcpServer {
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let args = params.0;
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             format!(
                 "Document the following procedure on the remote desktop: \"{}\"\n\
                 Device / session id: {}\n\
@@ -2295,22 +2285,19 @@ impl QuickDeskMcpServer {
 
 }
 
-#[tool_handler]
-#[prompt_handler]
+#[tool_handler(router = self.tool_router)]
+#[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for QuickDeskMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            capabilities: ServerCapabilities::builder()
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
                 .enable_prompts()
                 .build(),
-            server_info: Implementation {
-                name: "quickdesk-mcp".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                ..Default::default()
-            },
-            instructions: Some(
+        )
+        .with_server_info(Implementation::new("quickdesk-mcp", env!("CARGO_PKG_VERSION")))
+        .with_instructions(
                 "QuickDesk MCP Server - Control remote desktops via QuickDesk. \
                  Use get_host_info to get the local device credentials, then \
                  connect_device to establish a remote session. After connecting, \
@@ -2319,11 +2306,8 @@ impl ServerHandler for QuickDeskMcpServer {
                  QuickDesk is a desktop application with a GUI. When you connect \
                  to a device, a remote desktop viewer window is shown by default \
                  so the user can observe your operations in real time. You can \
-                 set show_window=false in connect_device for silent batch automation."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }
+                 set show_window=false in connect_device for silent batch automation.",
+        )
     }
 
     async fn list_resources(
@@ -2360,11 +2344,7 @@ impl ServerHandler for QuickDeskMcpServer {
             }
         }
 
-        Ok(ListResourcesResult {
-            resources,
-            next_cursor: None,
-            meta: None,
-        })
+        Ok(ListResourcesResult::with_all_items(resources))
     }
 
     async fn list_resource_templates(
@@ -2372,31 +2352,20 @@ impl ServerHandler for QuickDeskMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        Ok(ListResourceTemplatesResult {
-            resource_templates: vec![Annotated {
-                raw: RawResourceTemplate {
-                    uri_template: "quickdesk://device/{deviceId}".to_string(),
-                    name: "Remote session info".to_string(),
-                    title: None,
-                    description: Some(
-                        "Detailed info for a remote session by deviceId (from list_connections)"
-                            .to_string(),
-                    ),
-                    mime_type: Some("application/json".to_string()),
-                    icons: None,
-                },
-                annotations: None,
-            }],
-            next_cursor: None,
-            meta: None,
-        })
+        Ok(ListResourceTemplatesResult::with_all_items(vec![
+            ResourceTemplate::new("quickdesk://device/{deviceId}", "Remote session info")
+                .with_description(
+                    "Detailed info for a remote session by deviceId (from list_connections)",
+                )
+                .with_mime_type("application/json"),
+        ]))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         let uri = &request.uri;
 
         let result = if uri == "quickdesk://host" {
@@ -2417,14 +2386,12 @@ impl ServerHandler for QuickDeskMcpServer {
         match result {
             Ok(v) => {
                 let text = serde_json::to_string_pretty(&v).unwrap_or_default();
-                Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::TextResourceContents {
-                        uri: uri.to_string(),
-                        mime_type: Some("application/json".to_string()),
-                        text,
-                        meta: None,
-                    }],
-                })
+                Ok(
+                    ReadResourceResult::new(vec![
+                        ResourceContents::text(text, uri).with_mime_type("application/json"),
+                    ])
+                    .into(),
+                )
             }
             Err(e) => Err(ErrorData::internal_error(e, None)),
         }

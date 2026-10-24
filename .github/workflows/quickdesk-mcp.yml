@@ -1,0 +1,36 @@
+name: QuickDesk MCP compatibility
+
+on:
+  push:
+    paths:
+      - 'quickdesk-mcp/**'
+      - '.github/workflows/quickdesk-mcp.yml'
+  pull_request:
+    paths:
+      - 'quickdesk-mcp/**'
+      - '.github/workflows/quickdesk-mcp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build MCP bridge
+        run: cargo build --locked --manifest-path quickdesk-mcp/Cargo.toml
+      - name: Unit tests
+        run: cargo test --locked --manifest-path quickdesk-mcp/Cargo.toml
+      - name: Install test dependency
+        run: python -m pip install 'websockets>=14,<17'
+      - name: MCP wire compatibility tests
+        run: python quickdesk-mcp/tests/test_protocol.py

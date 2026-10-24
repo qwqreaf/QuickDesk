@@ -145,6 +145,42 @@ QuickDesk 启动并管理 `quickdesk-mcp` HTTP 服务器进程，并绑定到 `0
 
 > **注意：** VS Code 使用 `"type": "http"` 和顶层键 `"servers"`。其他客户端（Cursor、Claude Desktop、Windsurf）使用 `"type": "sse"` 和 `"mcpServers"`。
 
+#### OpenAI / ChatGPT（远程 MCP）
+
+桥接程序使用 `rmcp` 3.x，支持 Streamable HTTP、旧版 `initialize` 会话以及
+MCP `2026-07-28` 无状态发现。升级 SDK 本身不会让 OpenAI 访问到本机端点，
+还需要可访问的 HTTPS 地址，或用于私有服务的 Secure MCP Tunnel。
+
+使用带身份验证的反向代理提供 HTTPS，并允许代理转发的 `Host` 主机名：
+
+```bash
+quickdesk-mcp --transport http --host 127.0.0.1 --port 18080 \
+  --allowed-hosts mcp.example.com --token YOUR_QUICKDESK_TOKEN
+```
+
+本机回环地址仍然允许访问。直接通过局域网连接时，请把本机局域网 IP 加入
+`--allowed-hosts` 或 `QUICKDESK_ALLOWED_HOSTS`；`--host 0.0.0.0` 只设置监听地址。
+MCP `2026-07-28` 始终采用无状态模式，`--stateless` 用于同时关闭旧版客户端会话。
+
+在 Responses API 请求中加入以下工具配置：
+
+```json
+{
+  "tools": [{
+    "type": "mcp",
+    "server_label": "quickdesk",
+    "server_url": "https://mcp.example.com/mcp",
+    "authorization": "YOUR_HTTP_PROXY_ACCESS_TOKEN",
+    "require_approval": "always"
+  }]
+}
+```
+
+`--token` 只验证桥接程序到 QuickDesk 的 WebSocket 连接，**不会验证 HTTP 调用者**。
+反向代理需要验证 HTTP 身份并转发 `/mcp` 请求；示例中的 HTTP access token
+属于该代理。ChatGPT 连接器请使用远程 `/mcp` 地址及其支持的身份验证流程，
+或通过 Secure MCP Tunnel 连接私有服务。参见 [OpenAI 官方 MCP 指南](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)。
+
 #### 通用 MCP 客户端（stdio）
 
 `quickdesk-mcp` 是标准的 MCP stdio 服务器，任何支持 `stdio` 传输的客户端都可以使用：
@@ -166,8 +202,9 @@ quickdesk-mcp [--ws-url ws://127.0.0.1:9600] [--token YOUR_TOKEN]
 | `--transport` | `stdio` | `QUICKDESK_TRANSPORT` | 传输模式：`stdio` 或 `http` |
 | `--port` | `8080` | `QUICKDESK_HTTP_PORT` | HTTP 服务器端口（仅 HTTP 模式） |
 | `--host` | `127.0.0.1` | `QUICKDESK_HTTP_HOST` | HTTP 服务器绑定地址（仅 HTTP 模式） |
+| `--allowed-hosts` | 回环地址 | `QUICKDESK_ALLOWED_HOSTS` | 额外允许的 Host，逗号分隔；填写主机名或 host:port，不含协议和路径 |
 | `--cors-origin` | （空） | `QUICKDESK_CORS_ORIGIN` | 允许的 CORS 来源（仅 HTTP 模式） |
-| `--stateless` | `false` | — | 使用无状态 HTTP 会话（仅 HTTP 模式） |
+| `--stateless` | `false` | — | 关闭旧版 HTTP 会话；MCP 2026-07-28 始终无状态 |
 
 ### 3. 开始使用
 
@@ -851,7 +888,7 @@ cargo build --release
 
 ### 环境要求
 
-- Rust 1.75+
+- Rust 1.88+（`rmcp` 3.x 要求）
 - Cargo
 
 ### 依赖
@@ -879,6 +916,7 @@ cargo build --release
 2. 检查 URL 是否与 QuickDesk MCP 设置中显示的端点一致（默认本机 URL：`http://127.0.0.1:18080/mcp`）
 3. 确认防火墙未拦截 HTTP 端口
 4. 如需远程访问，`--host` 应设为 `0.0.0.0`（而不是 `127.0.0.1`）
+5. 将远程域名或局域网 IP 加入 `--allowed-hosts`；HTTP 403 可能表示 `Host` 被拒绝
 
 ### 截图返回空
 

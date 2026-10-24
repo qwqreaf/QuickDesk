@@ -250,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn test_wait_for_timeout() {
         let bus = EventBus::new(100);
-        let result = bus.wait_for("nonexistent", None, 50).await;
+        let result = bus.wait_for("nonexistent", None, 50, true).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Timeout"));
     }
@@ -275,6 +275,7 @@ mod tests {
                 "connectionStateChanged",
                 Some(&json!({"state": "connected"})),
                 2000,
+                true,
             )
             .await;
         assert!(result.is_ok());

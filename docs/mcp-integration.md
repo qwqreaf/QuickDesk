@@ -145,6 +145,47 @@ In QuickDesk, open MCP settings → switch to **HTTP/SSE** mode → toggle the M
 
 > **Note:** VS Code uses `"type": "http"` and the top-level key `"servers"`. Other clients use `"type": "sse"` and `"mcpServers"`.
 
+#### OpenAI / ChatGPT (remote MCP)
+
+The bridge uses `rmcp` 3.x and supports Streamable HTTP, including legacy
+`initialize` sessions and MCP `2026-07-28` stateless discovery. OpenAI connects
+using the MCP transport; upgrading the SDK alone does not make a local endpoint
+reachable from OpenAI.
+
+For a remote HTTPS endpoint, run the bridge behind an authenticated reverse proxy
+and explicitly allow the hostname that the proxy forwards in the `Host` header:
+
+```bash
+quickdesk-mcp --transport http --host 127.0.0.1 --port 18080 \
+  --allowed-hosts mcp.example.com --token YOUR_QUICKDESK_TOKEN
+```
+
+Loopback hosts remain allowed. For direct LAN access, add the machine's LAN IP
+to `--allowed-hosts` (or `QUICKDESK_ALLOWED_HOSTS`); binding `--host 0.0.0.0` only
+changes the listening interface. MCP `2026-07-28` is always stateless;
+`--stateless` also disables sessions for older clients.
+
+In a Responses API request, include this tool configuration:
+
+```json
+{
+  "tools": [{
+    "type": "mcp",
+    "server_label": "quickdesk",
+    "server_url": "https://mcp.example.com/mcp",
+    "authorization": "YOUR_HTTP_PROXY_ACCESS_TOKEN",
+    "require_approval": "always"
+  }]
+}
+```
+
+The bridge's `--token` authenticates its WebSocket connection to QuickDesk; it
+does **not** authenticate incoming HTTP requests. The proxy must enforce HTTP
+authentication and pass requests through to `/mcp`. The HTTP access token above
+belongs to that proxy. For ChatGPT, configure the remote `/mcp` URL and an
+authentication flow supported by your connector, or use Secure MCP Tunnel for a
+private server. See the official [OpenAI MCP guide](https://developers.openai.com/api/docs/guides/tools-connectors-mcp).
+
 #### Any MCP Client (stdio)
 
 `quickdesk-mcp` is a standard MCP stdio server. Any client that supports `stdio` transport can use it:
@@ -166,8 +207,9 @@ quickdesk-mcp [--ws-url ws://127.0.0.1:9600] [--token YOUR_TOKEN]
 | `--transport` | `stdio` | `QUICKDESK_TRANSPORT` | Transport mode: `stdio` or `http` |
 | `--port` | `8080` | `QUICKDESK_HTTP_PORT` | HTTP server port (HTTP mode only) |
 | `--host` | `127.0.0.1` | `QUICKDESK_HTTP_HOST` | HTTP server bind address (HTTP mode only) |
+| `--allowed-hosts` | loopback hosts | `QUICKDESK_ALLOWED_HOSTS` | Additional allowed Host authorities, comma-separated; hostnames or host:port, without scheme or path |
 | `--cors-origin` | (none) | `QUICKDESK_CORS_ORIGIN` | Allowed CORS origin (HTTP mode only) |
-| `--stateless` | `false` | — | Use stateless HTTP sessions (HTTP mode only) |
+| `--stateless` | `false` | — | Disable legacy HTTP sessions; MCP 2026-07-28 is always stateless |
 
 ### 3. Use It
 
@@ -853,7 +895,7 @@ cargo build --release
 
 ### Requirements
 
-- Rust 1.75+
+- Rust 1.88+ (`rmcp` 3.x requirement)
 - Cargo
 
 ### Dependencies
@@ -881,6 +923,7 @@ Make sure QuickDesk is running. The WebSocket API server must be active at `ws:/
 2. Verify the URL matches the endpoint shown in QuickDesk MCP settings (default local URL: `http://127.0.0.1:18080/mcp`)
 3. Ensure no firewall is blocking the HTTP port
 4. For remote access, the `--host` must be `0.0.0.0` (not `127.0.0.1`)
+5. Add the remote hostname or LAN IP to `--allowed-hosts`; HTTP 403 can indicate a rejected `Host` header
 
 ### Screenshot returns empty
 

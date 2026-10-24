@@ -21,6 +21,12 @@ pub async fn start_http(
     let ct = CancellationToken::new();
     let allowed_devices = config.allowed_devices.clone().unwrap_or_default();
     let session_manager = Arc::new(LocalSessionManager::default());
+    let mut http_config = StreamableHttpServerConfig::default()
+        .with_legacy_session_mode(!config.stateless)
+        .with_cancellation_token(ct.child_token());
+    if let Some(hosts) = &config.allowed_hosts {
+        http_config.allowed_hosts.extend(hosts.iter().cloned());
+    }
 
     let mcp_service: StreamableHttpService<QuickDeskMcpServer, LocalSessionManager> =
         StreamableHttpService::new(
@@ -32,11 +38,7 @@ pub async fn start_http(
                 ))
             },
             session_manager,
-            StreamableHttpServerConfig {
-                stateful_mode: !config.stateless,
-                cancellation_token: ct.child_token(),
-                ..Default::default()
-            },
+            http_config,
         );
 
     let app = Router::new()
@@ -78,7 +80,7 @@ pub async fn start_http(
         local_addr
     );
     tracing::info!(
-        "  Session mode: {}",
+        "  Legacy session mode: {} (MCP 2026-07-28 is always stateless)",
         if config.stateless { "stateless" } else { "stateful" }
     );
 

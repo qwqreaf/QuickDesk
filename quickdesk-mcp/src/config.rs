@@ -68,11 +68,16 @@ pub struct AppConfig {
     #[arg(long, default_value = "127.0.0.1", env = "QUICKDESK_HTTP_HOST")]
     pub host: String,
 
+    /// Additional allowed HTTP Host authorities (hostnames or host:port, not URLs).
+    /// Loopback hosts remain allowed. Required for a public hostname or LAN IP.
+    #[arg(long, env = "QUICKDESK_ALLOWED_HOSTS", value_delimiter = ',')]
+    pub allowed_hosts: Option<Vec<String>>,
+
     /// Allowed CORS origins, comma-separated (only used when transport=http, empty = no CORS headers)
     #[arg(long, env = "QUICKDESK_CORS_ORIGIN", value_delimiter = ',')]
     pub cors_origin: Option<Vec<String>>,
 
-    /// Enable stateless HTTP mode (no session tracking). Default is stateful.
+    /// Disable sessions for legacy HTTP clients. MCP 2026-07-28 is always stateless.
     #[arg(long, default_value = "false")]
     pub stateless: bool,
 }
