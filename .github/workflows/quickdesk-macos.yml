@@ -114,17 +114,17 @@ jobs:
           if [ "$arch" = x64 ]; then arch=x86_64; fi
           test -d "$app/Contents/Frameworks/quickdesk_host.app"
           host_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Frameworks/quickdesk_host.app/Contents/Info.plist")
-          lipo -verify_arch "$arch" "$app/Contents/Frameworks/quickdesk_host.app/Contents/MacOS/$host_executable"
+          lipo "$app/Contents/Frameworks/quickdesk_host.app/Contents/MacOS/$host_executable" -verify_arch "$arch"
           for binary in "$app/Contents/MacOS/QuickDesk" \
             "$app/Contents/Frameworks/quickdesk_client" \
             "$app/Contents/Frameworks/quickdesk-mcp" \
             "$app/Contents/Frameworks/quickdesk-skill-host"; do
             test -x "$binary"
-            lipo -verify_arch "$arch" "$binary"
+            lipo "$binary" -verify_arch "$arch"
           done
           for skill in sys-info file-ops shell-runner; do
             test -f "$app/Contents/Resources/skills/$skill/SKILL.md"
-            lipo -verify_arch "$arch" "$app/Contents/Resources/skills/$skill/$skill"
+            lipo "$app/Contents/Resources/skills/$skill/$skill" -verify_arch "$arch"
           done
           test -s "$app/Contents/Resources/icudtl.dat"
           codesign --verify --deep --strict "$app"
