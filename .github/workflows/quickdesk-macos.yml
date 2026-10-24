@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Publish both DMGs after successful builds (e.g. v4.2.0.1); empty builds artifacts only'
+        description: 'Publish the Apple Silicon DMG after a successful build (e.g. v4.2.0.1); empty builds artifacts only'
         required: false
         type: string
 
@@ -44,8 +44,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     env:
       QT_VERSION: '6.8.3'
@@ -167,7 +165,7 @@ jobs:
           pattern: QuickDesk-mac-*
           path: dist
           merge-multiple: true
-      - name: Publish both verified packages
+      - name: Publish verified Apple Silicon package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
@@ -178,7 +176,6 @@ jobs:
           version=$(cat version)
           test "$RELEASE_TAG" = "v$version"
           test -s "dist/QuickDesk-mac-arm64-${version}.dmg"
-          test -s "dist/QuickDesk-mac-x64-${version}.dmg"
           (cd dist && sha256sum *.dmg > SHA256SUMS)
           gh release create "$RELEASE_TAG" dist/*.dmg dist/SHA256SUMS \
             --repo "$RELEASE_REPO" --target "$RELEASE_SHA" \
