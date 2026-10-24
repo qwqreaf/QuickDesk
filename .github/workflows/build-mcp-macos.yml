@@ -1,0 +1,48 @@
+
+name: Build QuickDesk MCP macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-mcp:
+    name: Build MCP (Apple Silicon)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: quickdesk-mcp
+
+      - name: Build MCP Bridge
+        run: |
+          bash scripts/build_mcp_mac.sh Release arm64
+
+      - name: Verify binary
+        run: |
+          set -euo pipefail
+
+          BIN="output/arm64/Release/quickdesk-mcp"
+
+          test -s "$BIN"
+          file "$BIN"
+          lipo "$BIN" -verify_arch arm64
+          "$BIN" --help
+
+      - name: Upload MCP binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickdesk-mcp-macos-arm64
+          path: output/arm64/Release/quickdesk-mcp
+          if-no-files-found: error
+          retention-days: 30
