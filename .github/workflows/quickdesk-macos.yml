@@ -20,6 +20,15 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/quickdesk-macos.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish both DMGs after successful builds (e.g. v4.2.0.1); empty builds artifacts only'
+        required: false
+        type: string
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -33,9 +42,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
-          - runner: macos-14
+          - runner: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.runner }}
     env:
@@ -77,6 +86,17 @@ jobs:
       - name: Build MCP Bridge
         run: bash scripts/build_mcp_mac.sh Release ${{ matrix.arch }}
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify release MCP bridge
+        env:
+          QUICKDESK_MCP_BINARY: ${{ github.workspace }}/output/${{ matrix.arch }}/Release/quickdesk-mcp
+        run: |
+          python -m pip install 'websockets>=14,<17'
+          python quickdesk-mcp/tests/test_protocol.py
+
       - name: Build Skill Host
         run: bash scripts/build_skill_host_mac.sh Release ${{ matrix.arch }}
 
@@ -85,6 +105,31 @@ jobs:
 
       - name: Publish
         run: bash scripts/publish_qd_mac.sh Release ${{ matrix.arch }}
+
+      - name: Verify app bundle and architecture
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          app=publish/Release/QuickDesk.app
+          arch="$PACKAGE_ARCH"
+          if [ "$arch" = x64 ]; then arch=x86_64; fi
+          test -d "$app/Contents/Frameworks/quickdesk_host.app"
+          host_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Frameworks/quickdesk_host.app/Contents/Info.plist")
+          lipo -verify_arch "$arch" "$app/Contents/Frameworks/quickdesk_host.app/Contents/MacOS/$host_executable"
+          for binary in "$app/Contents/MacOS/QuickDesk" \
+            "$app/Contents/Frameworks/quickdesk_client" \
+            "$app/Contents/Frameworks/quickdesk-mcp" \
+            "$app/Contents/Frameworks/quickdesk-skill-host"; do
+            test -x "$binary"
+            lipo -verify_arch "$arch" "$binary"
+          done
+          for skill in sys-info file-ops shell-runner; do
+            test -f "$app/Contents/Resources/skills/$skill/SKILL.md"
+            lipo -verify_arch "$arch" "$app/Contents/Resources/skills/$skill/$skill"
+          done
+          test -s "$app/Contents/Resources/icudtl.dat"
+          codesign --verify --deep --strict "$app"
 
       - name: Package DMG
         run: bash scripts/package_qd_mac.sh Release
@@ -95,18 +140,47 @@ jobs:
           echo "version=$(cat version)" >> $GITHUB_OUTPUT
           echo "ref-name=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
 
+      - name: Name and verify DMG
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          hdiutil verify publish/Release/QuickDesk.dmg
+          mv publish/Release/QuickDesk.dmg "publish/Release/QuickDesk-mac-${PACKAGE_ARCH}-${PACKAGE_VERSION}.dmg"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: QuickDesk-mac-${{ matrix.arch }}-${{ steps.version.outputs.ref-name }}
-          path: publish/Release/QuickDesk.dmg
+          path: publish/Release/QuickDesk-mac-*.dmg
+          if-no-files-found: error
 
-      - name: Upload to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
+  release:
+    name: Publish macOS release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: publish/Release/QuickDesk.dmg
-          asset_name: QuickDesk-mac-${{ matrix.arch }}-${{ steps.version.outputs.ref-name }}.dmg
-          tag: ${{ github.ref }}
-          overwrite: true
+          pattern: QuickDesk-mac-*
+          path: dist
+          merge-multiple: true
+      - name: Publish both verified packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(cat version)
+          test "$RELEASE_TAG" = "v$version"
+          test -s "dist/QuickDesk-mac-arm64-${version}.dmg"
+          test -s "dist/QuickDesk-mac-x64-${version}.dmg"
+          (cd dist && sha256sum *.dmg > SHA256SUMS)
+          gh release create "$RELEASE_TAG" dist/*.dmg dist/SHA256SUMS \
+            --repo "$RELEASE_REPO" --target "$RELEASE_SHA" \
+            --title "QuickDesk $version (rmcp 3.x)" \
+            --notes-file "docs/releases/$version.md" --latest
